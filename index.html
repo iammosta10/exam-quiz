@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบสร้างข้อสอบจำลองจาก PDF อัตโนมัติ (Gemini AI)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- PDF.js สำหรับอ่านข้อความจากไฟล์ PDF โดยตรงบนเครื่องผู้ใช้ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+  <style>
+    body { font-family: 'Sarabun', sans-serif; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-emerald-800 text-white shadow-md sticky top-0 z-30">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
+      <div class="flex items-center space-x-2">
+        <span class="p-1.5 bg-emerald-700 rounded-lg text-lg font-bold">📑</span>
+        <div>
+          <h1 class="font-bold text-base md:text-lg leading-tight">ระบบสร้างข้อสอบจาก PDF ส่วนตัว</h1>
+          <p class="text-[11px] text-emerald-200">ประมวลผลด้วย Gemini AI • เฉลยทันที • วิเคราะห์จุดบกพร่อง</p>
+        </div>
+      </div>
+      <div id="status-bar" class="hidden text-xs flex items-center gap-2">
+        <span class="bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-600/40 text-emerald-100" id="progress-indicator">
+          ข้อที่ 0 / 0
+        </span>
+        <span class="bg-amber-500/20 text-amber-200 border border-amber-500/30 px-2.5 py-1 rounded-full font-semibold" id="score-indicator">
+          คะแนน: 0
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto w-full p-4 flex-grow flex flex-col justify-center">
+
+    <!-- Screen 1: ตั้งค่าและอัปโหลดไฟล์ -->
+    <div id="setup-screen" class="bg-white rounded-2xl shadow-xl p-6 md:p-8 border border-slate-200 space-y-6">
+      <div class="text-center space-y-2">
+        <h2 class="text-2xl font-bold text-slate-800">สร้างแบบทดสอบจำลอง (20 - 25 ข้อ)</h2>
+        <p class="text-slate-500 text-xs md:text-sm">อ่านไฟล์ PDF และสร้างข้อสอบ 5 ตัวเลือก พร้อมเฉลยและวิเคราะห์จุดอ่อน</p>
+      </div>
+
+      <div class="space-y-4">
+        <!-- API Key Box -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
+            Google Gemini API Key:
+          </label>
+          <div class="flex gap-2">
+            <input type="password" id="api-key-input" placeholder="วาง API Key ของคุณที่นี่ (AIzaSy...)" 
+                   class="flex-1 p-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none">
+            <button onclick="toggleKeyVisibility()" class="px-3 bg-slate-100 border border-slate-300 rounded-xl text-xs hover:bg-slate-200">
+              👁️
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">
+            * คีย์จะถูกบันทึกไว้ใน Browser ของคุณเท่านั้น ไม่มีการส่งออกนอกเครื่อง (ขอคีย์ฟรีได้ที่ Google AI Studio)
+          </p>
+        </div>
+
+        <!-- File Upload Box -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
+            เลือกไฟล์ PDF เอกสารหรือแผนงาน:
+          </label>
+          <input type="file" id="pdf-file-input" accept="application/pdf"
+                 class="block w-full text-xs text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer border border-slate-200 rounded-xl p-1 bg-slate-50">
+        </div>
+
+        <!-- Question Count Selector -->
+        <div class="grid grid-cols-2 gap-4 pt-1">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">จำนวนข้อสอบที่ต้องการ:</label>
+            <select id="question-count" class="w-full p-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none">
+              <option value="20">20 ข้อ (แนะนำ)</option>
+              <option value="25" selected>25 ข้อ (ครอบคลุมรอบด้าน)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">ช่วงหน้าที่ต้องการดึงข้อมูล:</label>
+            <input type="text" id="page-range" placeholder="เช่น 1-120 หรือ ปล่อยว่างเพื่ออ่านทั้งไฟล์"
+                   class="w-full p-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl outline-none">
+          </div>
+        </div>
+
+        <!-- Error Warning Box -->
+        <div id="error-message" class="hidden p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl"></div>
+
+        <!-- Loading Box -->
+        <div id="loading-box" class="hidden text-center py-6 space-y-3">
+          <div class="inline-block animate-spin rounded-full h-9 w-9 border-4 border-emerald-600 border-t-transparent"></div>
+          <p id="loading-text" class="text-sm font-medium text-emerald-800">กำลังอ่านข้อความจากไฟล์ PDF...</p>
+        </div>
+
+        <!-- Submit Button -->
+        <button id="generate-btn" onclick="startProcess()" 
+                class="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold rounded-xl shadow-lg transition-all transform active:scale-98 text-sm">
+          🚀 เริ่มอ่าน PDF และสร้างข้อสอบ
+        </button>
+      </div>
+    </div>
+
+    <!-- Screen 2: ส่วนทำข้อสอบ (Quiz Screen) -->
+    <div id="quiz-screen" class="hidden flex-col gap-4">
+      <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+        <div id="progress-bar" class="bg-emerald-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-md border border-slate-200 p-6 flex flex-col gap-5">
+        <div class="flex justify-between items-center pb-3 border-b border-slate-100 text-xs">
+          <span id="q-category" class="bg-emerald-50 text-emerald-700 font-semibold px-2.5 py-1 rounded-md border border-emerald-200">
+            หมวดหมู่
+          </span>
+          <span id="q-difficulty" class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+            ระดับ: ปานกลาง
+          </span>
+        </div>
+
+        <h3 id="question-text" class="text-base md:text-lg font-bold text-slate-800 leading-relaxed"></h3>
+
+        <!-- ตัวเลือก ก ข ค ง จ -->
+        <div id="options-container" class="space-y-2.5"></div>
+
+        <!-- คำอธิบาย/เฉลยทันที -->
+        <div id="rationale-box" class="hidden rounded-xl p-4 border transition-all text-xs md:text-sm">
+          <div class="flex items-start gap-2.5">
+            <span id="result-icon" class="text-lg leading-none mt-0.5"></span>
+            <div>
+              <h4 id="result-title" class="font-bold mb-1"></h4>
+              <p id="result-rationale" class="text-slate-700 leading-relaxed"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center pt-2 border-t border-slate-100">
+          <button onclick="confirmEndQuiz()" class="text-xs text-rose-500 hover:underline">
+            ข้ามไปดูผลลัพธ์
+          </button>
+          <button id="next-btn" onclick="nextQuestion()" class="hidden px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs md:text-sm font-semibold rounded-lg shadow">
+            ข้อถัดไป ➔
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Screen 3: วิเคราะห์ผลการสอบและจุดผิดพลาด (Result Screen) -->
+    <div id="result-screen" class="hidden bg-white rounded-2xl shadow-xl p-6 md:p-8 border border-slate-200 flex-col gap-6">
+      <div class="text-center space-y-2 border-b pb-5">
+        <h2 class="text-2xl font-bold text-slate-800">สรุปผลการทดสอบและการวิเคราะห์</h2>
+        <div class="flex justify-center items-baseline gap-1.5 pt-1">
+          <span id="final-score" class="text-4xl font-extrabold text-emerald-600">0</span>
+          <span class="text-xl text-slate-400">/ <span id="final-total">0</span></span>
+        </div>
+        <div id="score-verdict" class="inline-block px-3 py-1 rounded-full text-xs font-bold mt-1"></div>
+      </div>
+
+      <!-- สถิติรายหมวดหมู่ -->
+      <div>
+        <h3 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+          <span>📊</span> ผลคะแนนแยกตามหัวข้อเนื้อหา
+        </h3>
+        <div id="category-stats" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
+      </div>
+
+      <!-- รายการข้อผิดและจุดที่ต้องทบทวน -->
+      <div>
+        <h3 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+          <span>🔍</span> ข้อผิดพลาดและจุดที่ต้องกลับไปทบทวน (<span id="wrong-count">0</span> ข้อ)
+        </h3>
+        <div id="wrong-answers-container" class="space-y-3 max-h-80 overflow-y-auto pr-1 custom-scrollbar"></div>
+      </div>
+
+      <div class="pt-3 border-t flex justify-center gap-3">
+        <button onclick="restartQuiz()" class="px-5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-medium">
+          🔄 ทำข้อสอบชุดใหม่
+        </button>
+        <button onclick="window.print()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-medium">
+          🖨️ พิมพ์หน้ารายงานผล
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // ดึงค่า API Key จาก LocalStorage ถ้ามีบันทึกไว้
+    document.addEventListener("DOMContentLoaded", () => {
+      const savedKey = localStorage.getItem("gemini_api_key");
+      if (savedKey) document.getElementById("api-key-input").value = savedKey;
+    });
+
+    function toggleKeyVisibility() {
+      const input = document.getElementById("api-key-input");
+      input.type = input.type === "password" ? "text" : "password";
+    }
+
+    let questions = [];
+    let currentIndex = 0;
+    let userAnswers = [];
+    let score = 0;
+    let isAnswered = false;
+
+    // สเต็ปที่ 1: ดึงข้อความจาก PDF
+    async function extractTextFromPDF(file, rangeStr) {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const totalPages = pdf.numPages;
+
+      let startPage = 1;
+      let endPage = totalPages;
+
+      if (rangeStr && rangeStr.trim()) {
+        const parts = rangeStr.split("-").map(p => parseInt(p.trim()));
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          startPage = Math.max(1, parts[0]);
+          endPage = Math.min(totalPages, parts[1]);
+        }
+      }
+
+      let fullText = "";
+      for (let i = startPage; i <= endPage; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(item => item.str).join(" ");
+        fullText += `\n--- [หน้าที่ ${i}] ---\n` + pageText;
+      }
+      return fullText;
+    }
+
+    // สเต็ปที่ 2: เริ่มต้นกระบวนการเชื่อมต่อ Gemini
+    async function startProcess() {
+      const apiKey = document.getElementById("api-key-input").value.trim();
+      const fileInput = document.getElementById("pdf-file-input");
+      const questionCount = parseInt(document.getElementById("question-count").value);
+      const pageRange = document.getElementById("page-range").value;
+      const errorBox = document.getElementById("error-message");
+      const loadingBox = document.getElementById("loading-box");
+      const loadingText = document.getElementById("loading-text");
+      const generateBtn = document.getElementById("generate-btn");
+
+      errorBox.classList.add("hidden");
+      if (!apiKey) {
+        showError("กรุณากรอก Google Gemini API Key ก่อนดำเนินการ");
+        return;
+      }
+      if (!fileInput.files || fileInput.files.length === 0) {
+        showError("กรุณาเลือกไฟล์ PDF ที่ต้องการสร้างข้อสอบ");
+        return;
+      }
+
+      // บันทึกคีย์ไว้ใน LocalStorage เพื่อความสะดวกในครั้งต่อไป
+      localStorage.setItem("gemini_api_key", apiKey);
+
+      try {
+        generateBtn.disabled = true;
+        generateBtn.classList.add("opacity-50");
+        loadingBox.classList.remove("hidden");
+
+        // 1. อ่านไฟล์ PDF
+        loadingText.textContent = "กำลังสกัดข้อความจากเอกสาร PDF...";
+        const file = fileInput.files[0];
+        const extractedText = await extractTextFromPDF(file, pageRange);
+
+        if (!extractedText || extractedText.trim().length < 200) {
+          throw new Error("ไม่สามารถอ่านข้อความจาก PDF ได้ หรือไฟล์เป็นรูปภาพล้วนที่ไม่มี Text Layer");
+        }
+
+        // 2. เรียกใช้งาน Gemini API
+        loadingText.textContent = `AI กำลังวิเคราะห์เนื้อหาและร่างข้อสอบ 5 ช้อยส์ จำนวน ${questionCount} ข้อ...`;
+        questions = await callGeminiToGenerateExam(apiKey, extractedText, questionCount);
+
+        // 3. สลับไปหน้าทำข้อสอบ
+        loadingBox.classList.add("hidden");
+        generateBtn.disabled = false;
+        generateBtn.classList.remove("opacity-50");
+
+        startQuiz();
+
+      } catch (err) {
+        loadingBox.classList.add("hidden");
+        generateBtn.disabled = false;
+        generateBtn.classList.remove("opacity-50");
+        showError(err.message || "เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง");
+      }
+    }
+
+    function showError(msg) {
+      const errorBox = document.getElementById("error-message");
+      errorBox.textContent = msg;
+      errorBox.classList.remove("hidden");
+    }
+
+    // ฟังก์ชันเรียก Gemini API แบบ Structured JSON Output
+    async function callGeminiToGenerateExam(apiKey, textContent, count) {
+      // ตัดข้อความไม่ให้เกิน Context Window (จำกัดไว้ราว 300,000 ตัวอักษรสำหรับ Flash)
+      const truncatedText = textContent.slice(0, 350000);
+
+      const prompt = `
+คุณเป็นผู้เชี่ยวชาญด้านการออกแบบข้อสอบวัดผลระดับประเทศ
+จงอ่านเนื้อหาจากเอกสารด้านล่างนี้ และสร้างข้อสอบปรนัยแบบ 5 ตัวเลือก (ก, ข, ค, ง, จ) จำนวน ${count} ข้อ โดยมีเกณฑ์ดังนี้:
+1. ตัวเลือกต้องมีครบ 5 ข้อเสมอ (Options Array ความยาว 5 รายการ)
+2. กระจายระดับความยากง่าย (ง่าย, ปานกลาง, ยาก) คละกัน
+3. สุ่มกระจายครอบคลุมทุกบท/ทุกหัวข้อสำคัญในเอกสาร ห้ามออกซ้ำประเด็นเดียวกัน
+4. คำตอบและเหตุผล (rationale) ต้องมีข้อเท็จจริง ตัวเลข หรือเนื้อหาที่อ้างอิงตรงจากเอกสารเพื่อใช้ประกอบการทบทวนจุดผิดพลาด
+5. ส่งผลลัพธ์กลับมาเป็น JSON Array เท่านั้น ห้ามใส่ Markdown code fence อื่นใดนอกเหนือจาก JSON
+
+โครงสร้าง JSON ของแต่ละข้อ:
+[
+  {
+    "question": "คำถาม...",
+    "category": "ชื่อหัวข้อหรือหมวดหมู่ที่เกี่ยวข้อง",
+    "difficulty": "ง่าย/ปานกลาง/ยาก",
+    "options": ["ชอยส์ 1", "ชอยส์ 2", "ชอยส์ 3", "ชอยส์ 4", "ชอยส์ 5"],
+    "correct_index": 0,
+    "rationale": "เหตุผลประกอบเฉลยพร้อมข้อเท็จจริงจากเอกสาร"
+  }
+]
+
+เนื้อหาเอกสาร:
+${truncatedText}
+`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json"
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || `API Error status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const rawOutput = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawOutput) throw new Error("ไม่ได้รับข้อมูลตอบกลับจาก Gemini API");
+
+      try {
+        const parsed = JSON.parse(rawOutput);
+        return parsed;
+      } catch (e) {
+        throw new Error("ผลลัพธ์จาก AI ไม่อยู่ในรูปแบบ JSON ที่สมบูรณ์ กรุณาลดช่วงหน้าหรือลองใหม่อีกครั้ง");
+      }
+    }
+
+    // เริ่มต้นระบบ Quiz Engine
+    function startQuiz() {
+      currentIndex = 0;
+      userAnswers = [];
+      score = 0;
+
+      document.getElementById("setup-screen").classList.add("hidden");
+      document.getElementById("result-screen").classList.add("hidden");
+      document.getElementById("result-screen").classList.remove("flex");
+      document.getElementById("quiz-screen").classList.remove("hidden");
+      document.getElementById("quiz-screen").classList.add("flex");
+      document.getElementById("status-bar").classList.remove("hidden");
+
+      renderQuestion();
+    }
+
+    function renderQuestion() {
+      isAnswered = false;
+      const q = questions[currentIndex];
+
+      // อัปเดต Indicators
+      document.getElementById("progress-indicator").textContent = `ข้อที่ ${currentIndex + 1} / ${questions.length}`;
+      document.getElementById("score-indicator").textContent = `คะแนน: ${score}`;
+      const progressPercent = ((currentIndex + 1) / questions.length) * 100;
+      document.getElementById("progress-bar").style.width = `${progressPercent}%`;
+
+      document.getElementById("q-category").textContent = q.category || "ทั่วไป";
+      document.getElementById("q-difficulty").textContent = `ระดับ: ${q.difficulty || "ปานกลาง"}`;
+      document.getElementById("question-text").textContent = `${currentIndex + 1}. ${q.question}`;
+
+      const prefixes = ["ก", "ข", "ค", "ง", "จ"];
+      const optionsContainer = document.getElementById("options-container");
+      optionsContainer.innerHTML = "";
+
+      q.options.forEach((optText, idx) => {
+        const btn = document.createElement("button");
+        btn.id = `opt-${idx}`;
+        btn.className = "w-full text-left p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-all flex items-start gap-3 group focus:outline-none";
+        btn.onclick = () => handleSelectOption(idx);
+
+        const badge = document.createElement("span");
+        badge.className = "w-6 h-6 flex-shrink-0 rounded-md bg-slate-100 group-hover:bg-emerald-100 group-hover:text-emerald-800 text-slate-700 font-bold flex items-center justify-center text-xs border border-slate-300";
+        badge.textContent = prefixes[idx] || (idx + 1);
+
+        const txt = document.createElement("span");
+        txt.className = "text-xs md:text-sm text-slate-700 font-medium leading-relaxed flex-1";
+        txt.textContent = optText;
+
+        btn.appendChild(badge);
+        btn.appendChild(txt);
+        optionsContainer.appendChild(btn);
+      });
+
+      document.getElementById("rationale-box").classList.add("hidden");
+      document.getElementById("next-btn").classList.add("hidden");
+    }
+
+    function handleSelectOption(selectedIndex) {
+      if (isAnswered) return;
+      isAnswered = true;
+
+      const q = questions[currentIndex];
+      const isCorrect = (selectedIndex === q.correct_index);
+      if (isCorrect) score++;
+
+      userAnswers.push({
+        questionNumber: currentIndex + 1,
+        question: q.question,
+        category: q.category || "ทั่วไป",
+        selectedAnswer: q.options[selectedIndex],
+        correctAnswer: q.options[q.correct_index],
+        isCorrect: isCorrect,
+        rationale: q.rationale
+      });
+
+      document.getElementById("score-indicator").textContent = `คะแนน: ${score}`;
+
+      q.options.forEach((_, idx) => {
+        const btn = document.getElementById(`opt-${idx}`);
+        btn.disabled = true;
+
+        if (idx === q.correct_index) {
+          btn.className = "w-full text-left p-3 rounded-xl border-2 border-emerald-500 bg-emerald-50 text-emerald-900 flex items-start gap-3";
+          btn.children[0].className = "w-6 h-6 flex-shrink-0 rounded-md bg-emerald-600 text-white font-bold flex items-center justify-center text-xs";
+        } else if (idx === selectedIndex && !isCorrect) {
+          btn.className = "w-full text-left p-3 rounded-xl border-2 border-rose-500 bg-rose-50 text-rose-900 flex items-start gap-3";
+          btn.children[0].className = "w-6 h-6 flex-shrink-0 rounded-md bg-rose-600 text-white font-bold flex items-center justify-center text-xs";
+        } else {
+          btn.className = "w-full text-left p-3 rounded-xl border border-slate-200 bg-slate-50 opacity-60 flex items-start gap-3";
+        }
+      });
+
+      const rationaleBox = document.getElementById("rationale-box");
+      const resultIcon = document.getElementById("result-icon");
+      const resultTitle = document.getElementById("result-title");
+      const resultRationale = document.getElementById("result-rationale");
+
+      rationaleBox.classList.remove("hidden");
+      if (isCorrect) {
+        rationaleBox.className = "rounded-xl p-3.5 border border-emerald-300 bg-emerald-50 text-emerald-900";
+        resultIcon.textContent = "✅";
+        resultTitle.textContent = "ถูกต้อง!";
+      } else {
+        rationaleBox.className = "rounded-xl p-3.5 border border-rose-300 bg-rose-50 text-rose-900";
+        resultIcon.textContent = "❌";
+        resultTitle.textContent = `ยังไม่ถูกต้อง (ข้อที่ถูกคือ: ${q.options[q.correct_index]})`;
+      }
+      resultRationale.textContent = q.rationale || "ไม่มีคำอธิบายเพิ่มเติม";
+
+      const nextBtn = document.getElementById("next-btn");
+      nextBtn.classList.remove("hidden");
+      nextBtn.textContent = currentIndex === questions.length - 1 ? "ดูผลการวิเคราะห์ 🏁" : "ข้อถัดไป ➔";
+    }
+
+    function nextQuestion() {
+      if (currentIndex < questions.length - 1) {
+        currentIndex++;
+        renderQuestion();
+      } else {
+        showResults();
+      }
+    }
+
+    function confirmEndQuiz() {
+      if (confirm(`คุณทำไปแล้ว ${userAnswers.length} จาก ${questions.length} ข้อ ต้องการดูสรุปผลทันทีหรือไม่?`)) {
+        showResults();
+      }
+    }
+
+    // แสดงผลและวิเคราะห์จุดผิดพลาด
+    function showResults() {
+      document.getElementById("quiz-screen").classList.add("hidden");
+      document.getElementById("quiz-screen").classList.remove("flex");
+      document.getElementById("status-bar").classList.add("hidden");
+
+      const resScreen = document.getElementById("result-screen");
+      resScreen.classList.remove("hidden");
+      resScreen.classList.add("flex");
+
+      const total = userAnswers.length;
+      document.getElementById("final-score").textContent = score;
+      document.getElementById("final-total").textContent = total;
+
+      const pct = total > 0 ? (score / total) * 100 : 0;
+      const verdict = document.getElementById("score-verdict");
+
+      if (pct >= 80) {
+        verdict.className = "inline-block px-3 py-1 rounded-full text-xs font-bold mt-1 bg-emerald-100 text-emerald-800 border border-emerald-300";
+        verdict.textContent = `ยอดเยี่ยม! คุณเข้าใจเนื้อหาถึง ${pct.toFixed(1)}%`;
+      } else if (pct >= 60) {
+        verdict.className = "inline-block px-3 py-1 rounded-full text-xs font-bold mt-1 bg-amber-100 text-amber-800 border border-amber-300";
+        verdict.textContent = `ผ่านเกณฑ์พื้นฐาน (${pct.toFixed(1)}%) แนะนำให้อ่านทบทวนหัวข้อที่ตอบผิด`;
+      } else {
+        verdict.className = "inline-block px-3 py-1 rounded-full text-xs font-bold mt-1 bg-rose-100 text-rose-800 border border-rose-300";
+        verdict.textContent = `ได้คะแนน ${pct.toFixed(1)}% ควรเน้นทบทวนประเด็นหลักในเอกสารอีกครั้ง`;
+      }
+
+      // สรุปสถิติรายหมวด
+      const catMap = {};
+      userAnswers.forEach(ans => {
+        if (!catMap[ans.category]) catMap[ans.category] = { total: 0, correct: 0 };
+        catMap[ans.category].total++;
+        if (ans.isCorrect) catMap[ans.category].correct++;
+      });
+
+      const catContainer = document.getElementById("category-stats");
+      catContainer.innerHTML = "";
+      for (const [cat, data] of Object.entries(catMap)) {
+        const catPct = Math.round((data.correct / data.total) * 100);
+        const card = document.createElement("div");
+        card.className = "bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col justify-between";
+        card.innerHTML = `
+          <div class="flex justify-between items-center mb-1.5">
+            <span class="text-xs font-semibold text-slate-800 truncate pr-2">${cat}</span>
+            <span class="text-[11px] font-bold ${catPct >= 70 ? 'text-emerald-600' : 'text-rose-600'}">${catPct}% (${data.correct}/${data.total})</span>
+          </div>
+          <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+            <div class="${catPct >= 70 ? 'bg-emerald-500' : 'bg-rose-500'} h-1.5 rounded-full" style="width: ${catPct}%"></div>
+          </div>
+        `;
+        catContainer.appendChild(card);
+      }
+
+      // สรุปข้อผิดและจุดที่ต้องทบทวน
+      const wrongList = userAnswers.filter(a => !a.isCorrect);
+      document.getElementById("wrong-count").textContent = wrongList.length;
+      const wrongContainer = document.getElementById("wrong-answers-container");
+      wrongContainer.innerHTML = "";
+
+      if (wrongList.length === 0) {
+        wrongContainer.innerHTML = `<div class="p-4 bg-emerald-50 text-emerald-800 rounded-xl text-center text-xs font-medium border border-emerald-200">🎉 ยอดเยี่ยม คุณตอบถูกต้องครบทุกข้อ!</div>`;
+      } else {
+        wrongList.forEach(item => {
+          const div = document.createElement("div");
+          div.className = "bg-rose-50/60 border border-rose-200 rounded-xl p-3 text-xs space-y-1";
+          div.innerHTML = `
+            <div class="flex items-center gap-1.5 font-bold text-rose-900">
+              <span class="bg-rose-200 text-rose-800 px-1.5 py-0.5 rounded text-[10px]">ข้อ ${item.questionNumber}</span>
+              <span>หมวด: ${item.category}</span>
+            </div>
+            <p class="font-semibold text-slate-800 mt-1">${item.question}</p>
+            <p class="text-rose-700">❌ ชอยส์ที่คุณตอบ: <span class="font-medium">${item.selectedAnswer}</span></p>
+            <p class="text-emerald-800">✔ คำตอบที่ถูก: <span class="font-bold">${item.correctAnswer}</span></p>
+            <p class="text-slate-600 bg-white p-2 rounded-lg border border-rose-100 mt-1"><strong>💡 คำอธิบายจุดที่ต้องทบทวน:</strong> ${item.rationale}</p>
+          `;
+          wrongContainer.appendChild(div);
+        });
+      }
+    }
+
+    function restartQuiz() {
+      document.getElementById("result-screen").classList.add("hidden");
+      document.getElementById("result-screen").classList.remove("flex");
+      document.getElementById("setup-screen").classList.remove("hidden");
+    }
+  </script>
+</body>
+</html>
